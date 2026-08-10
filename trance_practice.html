@@ -81,6 +81,15 @@
   .tip{ font-size:16px; color:var(--teal); margin-top:12px; line-height:1.5; }
   .tip b{ color:#2C4A3F; }
 
+  .mode-toggle{ display:flex; gap:8px; margin-bottom:22px; flex-wrap:wrap; }
+  .mode-btn{
+    font-family:inherit; font-size:16px; border:1px solid var(--line); background:var(--surface);
+    color:var(--ink-muted); padding:10px 16px; border-radius:999px; cursor:pointer;
+  }
+  .mode-btn.active{ background:var(--ink); color:var(--bg); border-color:var(--ink); font-weight:600; }
+  .goal-textarea{ min-height:70px; font-family:'Inter',sans-serif; font-size:16px; }
+  html[dir="rtl"] .goal-textarea{ font-family:'Assistant',sans-serif; }
+
   .drill-scenario{
     background:var(--surface-2); border:1px solid var(--line); border-radius:var(--radius);
     padding:22px; margin-bottom:20px;
@@ -159,14 +168,34 @@
 
   <section class="panel" id="panel-drill">
     <div class="section-title display" data-i18n="tabDrill">Practice drill</div>
-    <div class="controls-row">
-      <select id="pattern-select"></select>
-      <button class="btn ghost" id="new-scenario" data-i18n="newScenario">New scenario</button>
+
+    <div class="mode-toggle">
+      <button id="mode-guided" class="mode-btn active" data-i18n="modeGuided">Practice with a scenario</button>
+      <button id="mode-free" class="mode-btn" data-i18n="modeFree">Use my own situation</button>
     </div>
-    <div class="drill-scenario">
-      <div class="label" data-i18n="scenarioLabel">Scenario</div>
-      <div class="scen-text" id="scen-text"></div>
+
+    <div id="guided-block">
+      <div class="controls-row">
+        <select id="pattern-select"></select>
+        <button class="btn ghost" id="new-scenario" data-i18n="newScenario">New scenario</button>
+      </div>
+      <div class="drill-scenario">
+        <div class="label" data-i18n="scenarioLabel">Scenario</div>
+        <div class="scen-text" id="scen-text"></div>
+      </div>
     </div>
+
+    <div id="free-block" style="display:none;">
+      <div class="controls-row">
+        <select id="pattern-select-free"></select>
+      </div>
+      <div class="drill-scenario">
+        <div class="label" data-i18n="goalLabel">What are you trying to say, and to whom?</div>
+        <textarea id="goal-input" class="goal-textarea" data-i18n-ph="goalPlaceholder" placeholder="e.g. My business partner is dragging their feet on signing off a new hire. I want to help them feel good about deciding quickly."></textarea>
+      </div>
+    </div>
+
+    <div class="label" data-i18n="yourTextLabel" style="margin-bottom:8px;">Your line</div>
     <textarea id="user-input" data-i18n-ph="inputPlaceholder" placeholder="Write your line here..."></textarea>
     <div class="controls-row" style="margin-top:14px;">
       <button class="btn primary" id="submit-btn" data-i18n="getFeedback">Get feedback</button>
@@ -212,7 +241,15 @@ const I18N = {
     improvedLabel: "A sharper version",
     errorMsg: "Couldn't reach the feedback model. Try again in a moment.",
     emptyInputMsg: "Write a line before asking for feedback.",
-    patternSelectLabel: "Target pattern"
+    patternSelectLabel: "Target pattern",
+    modeGuided: "Practice with a scenario",
+    modeFree: "Use my own situation",
+    goalLabel: "What are you trying to say, and to whom?",
+    goalPlaceholder: "e.g. My business partner is dragging their feet on signing off a new hire. I want to help them feel good about deciding quickly.",
+    yourTextLabel: "Your line",
+    anyPattern: "Any pattern — let the coach choose",
+    emptyGoalMsg: "Describe the situation before asking for feedback.",
+    aiChoice: "AI's choice"
   },
   he: {
     eyebrow: "מרחב תרגול",
@@ -233,7 +270,15 @@ const I18N = {
     improvedLabel: "גרסה חדה יותר",
     errorMsg: "לא הצלחתי להתחבר למודל המשוב. נסה שוב בעוד רגע.",
     emptyInputMsg: "כתוב משפט לפני שתבקש משוב.",
-    patternSelectLabel: "דפוס יעד"
+    patternSelectLabel: "דפוס יעד",
+    modeGuided: "תרגול עם תרחיש",
+    modeFree: "השתמש במצב שלי",
+    goalLabel: "מה אתה מנסה להגיד, ולמי?",
+    goalPlaceholder: "לדוגמה: השותף העסקי שלי מתמהמה באישור גיוס עובד חדש. אני רוצה לעזור לו להרגיש טוב עם החלטה מהירה.",
+    yourTextLabel: "המשפט שלך",
+    anyPattern: "כל דפוס — תן למאמן לבחור",
+    emptyGoalMsg: "תאר את המצב לפני שתבקש משוב.",
+    aiChoice: "בחירת ה-AI"
   }
 };
 
@@ -366,6 +411,7 @@ const SCENARIOS = [
 ];
 
 let LANG = "en";
+let MODE = "guided";
 let currentScenario = SCENARIOS[Math.floor(Math.random()*SCENARIOS.length)];
 let historyCache = [];
 
@@ -416,6 +462,12 @@ function renderPatternSelect(){
   const prev = sel.value;
   sel.innerHTML = PATTERNS.map(p=>`<option value="${p.id}">${p[LANG].name}</option>`).join("");
   if (prev) sel.value = prev;
+
+  const selFree = document.getElementById("pattern-select-free");
+  const prevFree = selFree.value;
+  selFree.innerHTML = `<option value="any">${t("anyPattern")}</option>` +
+    PATTERNS.map(p=>`<option value="${p.id}">${p[LANG].name}</option>`).join("");
+  if (prevFree) selFree.value = prevFree;
 }
 
 function renderScenario(){
@@ -464,7 +516,7 @@ function renderHistory(){
   section.style.display = "block";
   list.innerHTML = historyCache.map(h=>{
     const pat = PATTERNS.find(p=>p.id===h.patternId);
-    const patName = pat ? pat[LANG].name : h.patternId;
+    const patName = h.patternId === "any" ? t("aiChoice") : (pat ? pat[LANG].name : h.patternId);
     return `<div class="history-item">
       <span class="h-score">${h.score}/10</span>
       <span class="h-pattern">${patName}</span>
@@ -473,39 +525,85 @@ function renderHistory(){
   }).join("");
 }
 
+function setMode(mode){
+  MODE = mode;
+  document.getElementById("mode-guided").classList.toggle("active", mode==="guided");
+  document.getElementById("mode-free").classList.toggle("active", mode==="free");
+  document.getElementById("guided-block").style.display = mode==="guided" ? "block" : "none";
+  document.getElementById("free-block").style.display = mode==="free" ? "block" : "none";
+  document.getElementById("feedback-slot").innerHTML = "";
+}
+
 async function getFeedback(){
   const input = document.getElementById("user-input");
   const text = input.value.trim();
   const slot = document.getElementById("feedback-slot");
+
   if (!text){
     slot.innerHTML = `<div class="error">${t("emptyInputMsg")}</div>`;
     return;
   }
-  const patternId = document.getElementById("pattern-select").value;
-  const pattern = PATTERNS.find(p=>p.id===patternId);
-  const patternName = pattern[LANG].name;
-  const patternDef = pattern[LANG].def;
+
+  let patternId, patternName, patternDef, contextText, isAny = false;
+
+  if (MODE === "guided"){
+    patternId = document.getElementById("pattern-select").value;
+    const pattern = PATTERNS.find(p=>p.id===patternId);
+    patternName = pattern[LANG].name;
+    patternDef = pattern[LANG].def;
+    contextText = currentScenario[LANG];
+  } else {
+    const goalInput = document.getElementById("goal-input");
+    contextText = goalInput.value.trim();
+    if (!contextText){
+      slot.innerHTML = `<div class="error">${t("emptyGoalMsg")}</div>`;
+      return;
+    }
+    patternId = document.getElementById("pattern-select-free").value;
+    isAny = patternId === "any";
+    if (!isAny){
+      const pattern = PATTERNS.find(p=>p.id===patternId);
+      patternName = pattern[LANG].name;
+      patternDef = pattern[LANG].def;
+    }
+  }
 
   const submitBtn = document.getElementById("submit-btn");
   submitBtn.disabled = true;
   slot.innerHTML = `<div class="loading">${t("gettingFeedback")}</div>`;
 
   const langName = LANG === "he" ? "Hebrew" : "English";
-  const systemPrompt = `You are a precise, encouraging coach for conversational Ericksonian hypnosis and NLP-derived language patterns. The user is practicing writing ONE sentence that applies a specific target pattern to a given scenario, for real-world conversational use (not clinical hypnotherapy scripts).
+  let systemPrompt, userMsg;
+
+  if (!isAny){
+    systemPrompt = `You are a precise, encouraging coach for conversational Ericksonian hypnosis and NLP-derived language patterns. The user is practicing writing ONE sentence that applies a specific target pattern to a given real-world situation (not a clinical hypnotherapy script).
 
 Target pattern: "${patternName}" — defined as: ${patternDef}
 
 Evaluate the user's sentence on:
 1. Structural correctness — does it actually demonstrate the target pattern, or just superficially resemble it?
 2. Naturalness — would a real person say this out loud without sounding stilted or obviously scripted?
-3. Effectiveness — how well it moves toward the scenario's implied goal.
+3. Effectiveness — how well it moves toward the stated goal.
 
 Respond with ONLY a raw JSON object, no markdown fences, no preamble, in this exact shape:
 {"score": <integer 1-10>, "feedback": "<2-3 sentences, specific, in ${langName}>", "improved_example": "<one rewritten sentence, in ${langName}, that demonstrates a stronger version>"}
 
 Write the feedback and improved_example fields entirely in ${langName}. Keep feedback under 60 words.`;
+    userMsg = `Situation / goal: ${contextText}\nTarget pattern: ${patternName}\nUser's sentence: "${text}"`;
+  } else {
+    systemPrompt = `You are a precise, encouraging coach for conversational Ericksonian hypnosis and NLP-derived language patterns. The user describes a real situation and what they want to say, then writes their own attempt at an influential line. No specific pattern was assigned — figure out which pattern(s) their line already leans on (if any), and what it would benefit from.
 
-  const userMsg = `Scenario: ${currentScenario[LANG]}\nTarget pattern: ${patternName}\nUser's sentence: "${text}"`;
+Evaluate the user's sentence on:
+1. Whether it already uses any recognizable pattern (embedded commands, presuppositions, truisms/yes-sets, metaphor, pacing and leading, conversational postulates, double binds, vague language, utilization), and how well.
+2. Naturalness — would a real person say this out loud without sounding stilted or scripted?
+3. Effectiveness — how well it moves toward the stated goal.
+
+Respond with ONLY a raw JSON object, no markdown fences, no preamble, in this exact shape:
+{"score": <integer 1-10>, "feedback": "<2-3 sentences naming which pattern(s) are present or missing and what to sharpen, in ${langName}>", "improved_example": "<one rewritten sentence, in ${langName}, that demonstrates a stronger version, ideally naming which pattern it uses>"}
+
+Write the feedback and improved_example fields entirely in ${langName}. Keep feedback under 70 words.`;
+    userMsg = `Situation / goal: ${contextText}\nUser's sentence: "${text}"`;
+  }
 
   try{
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -536,8 +634,8 @@ Write the feedback and improved_example fields entirely in ${langName}. Keep fee
       </div>`;
 
     saveHistoryEntry({
-      patternId, userText: text, score: parsed.score,
-      scenario: currentScenario[LANG], date: Date.now()
+      patternId: isAny ? "any" : patternId, userText: text, score: parsed.score,
+      scenario: contextText, date: Date.now()
     });
   }catch(e){
     slot.innerHTML = `<div class="error">${t("errorMsg")}</div>`;
@@ -551,6 +649,8 @@ document.getElementById("btn-he").addEventListener("click", ()=>{ LANG="he"; app
 document.getElementById("new-scenario").addEventListener("click", newScenario);
 document.getElementById("submit-btn").addEventListener("click", getFeedback);
 document.getElementById("clear-history").addEventListener("click", clearHistory);
+document.getElementById("mode-guided").addEventListener("click", ()=> setMode("guided"));
+document.getElementById("mode-free").addEventListener("click", ()=> setMode("free"));
 
 applyLang();
 loadHistory();
